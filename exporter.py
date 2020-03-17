@@ -1,4 +1,3 @@
-import sys
 import signal
 import logging
 import tornado
