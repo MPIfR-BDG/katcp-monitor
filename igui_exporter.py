@@ -209,7 +209,7 @@ class IGUIExporter(object):
                         'mysql_task_type': 'GET'
                         },
                     'node_name': valid_name,
-                    'parent_id': self._device_id})
+                    'parent_name': self._device_id})
             log.debug(response.json())
             self._task_map[valid_name] = response.json()["node_id"]
 
