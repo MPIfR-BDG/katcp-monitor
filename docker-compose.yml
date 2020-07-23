@@ -1,0 +1,9 @@
+version: "2"
+services:
+        igui_exporter:
+                image: frosty_eu:latest
+                entrypoint: 'python igui_exporter.py '
+                command: '--host 134.104.18.167  --port 5000 --igui-url http://134.104.16.96 --igui-user ubb --igui-pass ubb --igui-parent PM1-ICOM::P200MM::Internal --log-level info'
+                expose:
+                        - "5000"
+
