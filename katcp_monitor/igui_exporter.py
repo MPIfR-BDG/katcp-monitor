@@ -22,7 +22,9 @@ def retry_on_fail(min_interval=5.0, max_interval=600.0, max_retries=None):
                 try:
                     response = func(*args, **kwargs)
                 except requests.ConnectionError as error:
-                    log.error("Unable to connect to IGUI: {}".format(str(error)))
+                    log.error(
+                        "Unable to connect to IGUI: {}".format(
+                            str(error)))
                     time.sleep(wait)
                     wait += min_interval
                     if wait >= max_interval:
@@ -172,10 +174,11 @@ class IGUIExporter(object):
     @retry_on_fail(min_interval=5.0, max_interval=600.0, max_retries=None)
     def authorize(self, user, password):
         response = self._session.get(
-                    self.url_for(self.AUTH_URL),
-                    auth=(user, password))
+            self.url_for(self.AUTH_URL),
+            auth=(user, password))
         if response.status_code != 200:
-            raise Exception("Authorization request failed with status [{}]: {}".format(
+            raise Exception(
+                "Authorization request failed with status [{}]: {}".format(
                     response.status_code, response.reason))
         elif response.text == 'true':
             log.info("Successfully authorized with IGUI")
@@ -183,7 +186,10 @@ class IGUIExporter(object):
             raise Exception("Unknown exception on login")
 
     def populate_task_map(self):
-        response = self._session.get(self.url_for(self.TREE_URL, self._device_id))
+        response = self._session.get(
+            self.url_for(
+                self.TREE_URL,
+                self._device_id))
         tree = response.json()
         for child in tree["children"]:
             self._task_map[child["data"]["node_name"]] = child["id"]
@@ -210,7 +216,7 @@ class IGUIExporter(object):
                     'current_value': reading.value,
                     'metadata': {
                         'mysql_task_type': 'GET'
-                        },
+                    },
                     'node_name': valid_name,
                     'parent_name': self._device_id})
             log.debug("POST request took {} seconds".format(
@@ -238,20 +244,26 @@ def main():
     usage = "usage: %prog [options]"
     parser = ArgumentParser(description=usage)
     parser.add_argument('--host', action='store', dest='host', type=str,
-        help='The hostname for the KATCP server to connect to')
-    parser.add_argument('--port', action='store', dest='port', type=int,
+                        help='The hostname for the KATCP server to connect to')
+    parser.add_argument(
+        '--port', action='store', dest='port', type=int,
         help='The port number for the KATCP server to connect to')
     parser.add_argument('--igui-url', action='store', dest='igui_url',
-        type=str, help='The IGUI URL address to connect to',
-        default="http://localhost:30001")
+                        type=str, help='The IGUI URL address to connect to',
+                        default="http://localhost:30001")
     parser.add_argument('--igui-user', action='store', dest='igui_user',
-        type=str, help='The IGUI username', default="admin")
+                        type=str, help='The IGUI username', default="admin")
     parser.add_argument('--igui-pass', action='store', dest='igui_pass',
-        type=str, help='The IGUI password', default="admin")
+                        type=str, help='The IGUI password', default="admin")
     parser.add_argument('--igui-parent', action='store', dest='igui_parent',
-        type=str, help='The IGUI parent ID')
-    parser.add_argument('--log-level', action='store', dest='log_level', type=str,
-        help='Logging level', default="INFO")
+                        type=str, help='The IGUI parent ID')
+    parser.add_argument(
+        '--log-level',
+        action='store',
+        dest='log_level',
+        type=str,
+        help='Logging level',
+        default="INFO")
     args = parser.parse_args()
     FORMAT = "[ %(levelname)s - %(asctime)s - %(filename)s:%(lineno)s] %(message)s"
     logger = logging.getLogger('katcp-monitor')
@@ -265,7 +277,12 @@ def main():
         signal.SIGINT,
         lambda sig, frame: ioloop.add_callback_from_signal(
             on_shutdown, ioloop, client, handler))
-    handler = IGUIExporter(args.igui_url, args.igui_user, args.igui_pass, args.igui_parent, client)
+    handler = IGUIExporter(
+        args.igui_url,
+        args.igui_user,
+        args.igui_pass,
+        args.igui_parent,
+        client)
     client.add_sensor_update_callback(handler.sensor_udpate_callback)
 
     def start_and_display():

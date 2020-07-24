@@ -37,7 +37,7 @@ class KatcpSidecar(object):
             yield self.rc.until_synced()
             log.debug("Client synced")
             #log.debug("Requesting version info")
-            #response = yield self.rc.req.version_list()
+            # response = yield self.rc.req.version_list()
             #log.info("response: {}".format(response))
             self.ioloop.add_callback(self.on_interface_changed)
         self.rc.start()
@@ -124,7 +124,7 @@ class KatcpSidecar(object):
         start = time.time()
         response = yield request(*args, **kwargs)
         log.debug("Request to server took {} seconds".format(
-            time.time()-start))
+            time.time() - start))
         if not response.reply.reply_ok():
             raise Exception(response.reply.arguments[1])
         raise Return(response)
@@ -141,11 +141,17 @@ def main():
     usage = "usage: %prog [options]"
     parser = ArgumentParser(description=usage)
     parser.add_argument('--host', action='store', dest='host', type=str,
-        help='The hostname for the KATCP server to connect to')
-    parser.add_argument('--port', action='store', dest='port', type=int,
+                        help='The hostname for the KATCP server to connect to')
+    parser.add_argument(
+        '--port', action='store', dest='port', type=int,
         help='The port number for the KATCP server to connect to')
-    parser.add_argument('--log-level', action='store', dest='log_level', type=str,
-        help='Logging level', default="INFO")
+    parser.add_argument(
+        '--log-level',
+        action='store',
+        dest='log_level',
+        type=str,
+        help='Logging level',
+        default="INFO")
     args = parser.parse_args()
     FORMAT = "[ %(levelname)s - %(asctime)s - %(filename)s:%(lineno)s] %(message)s"
     logger = logging.getLogger('katcp-monitor')

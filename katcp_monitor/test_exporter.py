@@ -12,6 +12,7 @@ class TestExporter(object):
     """
     An exporter for converting KATCP sensor updates to
     """
+
     def __init__(self, valid_istates=None):
         """
         @brief    Construct an InfluxDBExporter
@@ -40,11 +41,17 @@ def main():
     usage = "usage: %prog [options]"
     parser = ArgumentParser(description=usage)
     parser.add_argument('--host', action='store', dest='host', type=str,
-        help='The hostname for the KATCP server to connect to')
-    parser.add_argument('--port', action='store', dest='port', type=int,
+                        help='The hostname for the KATCP server to connect to')
+    parser.add_argument(
+        '--port', action='store', dest='port', type=int,
         help='The port number for the KATCP server to connect to')
-    parser.add_argument('--log-level', action='store', dest='log_level', type=str,
-        help='Logging level', default="INFO")
+    parser.add_argument(
+        '--log-level',
+        action='store',
+        dest='log_level',
+        type=str,
+        help='Logging level',
+        default="INFO")
     args = parser.parse_args()
     FORMAT = "[ %(levelname)s - %(asctime)s - %(filename)s:%(lineno)s] %(message)s"
     logger = logging.getLogger('katcp-exporter')

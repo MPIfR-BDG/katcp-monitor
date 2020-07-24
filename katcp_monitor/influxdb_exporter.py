@@ -13,6 +13,7 @@ class InfluxDBExporter(object):
     """
     An exporter for converting KATCP sensor updates to
     """
+
     def __init__(self, hostname, port, user,
                  password, db, tags,
                  valid_istates=None):
@@ -39,7 +40,7 @@ class InfluxDBExporter(object):
                 "fields":
                     {
                         "value": reading.value
-                    }
+                }
             }]
         log.debug("Exporting '{}'".format(json_body))
         self._client.write_points(json_body)
@@ -56,33 +57,57 @@ def main():
     usage = "usage: %prog [options]"
     parser = ArgumentParser(description=usage)
     parser.add_argument('--host', action='store', dest='host', type=str,
-        help='The hostname for the KATCP server to connect to')
-    parser.add_argument('--port', action='store', dest='port', type=int,
+                        help='The hostname for the KATCP server to connect to')
+    parser.add_argument(
+        '--port', action='store', dest='port', type=int,
         help='The port number for the KATCP server to connect to')
-    parser.add_argument('--idb-host', action='store', dest='idb_host',
-        type=str, help='The InfluxDB instance address to connect to',
+    parser.add_argument(
+        '--idb-host',
+        action='store',
+        dest='idb_host',
+        type=str,
+        help='The InfluxDB instance address to connect to',
         default="0.0.0.0")
-    parser.add_argument('--idb-port', action='store', dest='idb_port',
-        type=int,  help='The InfluxDB instance port to connect to',
+    parser.add_argument(
+        '--idb-port',
+        action='store',
+        dest='idb_port',
+        type=int,
+        help='The InfluxDB instance port to connect to',
         default=8086)
-    parser.add_argument('--idb-user', action='store', dest='idb_user',
-        type=str, help='The InfluxDB username', default="admin")
-    parser.add_argument('--idb-pass', action='store', dest='idb_pass',
-        type=str, help='The InfluxDB password', default="admin")
+    parser.add_argument(
+        '--idb-user',
+        action='store',
+        dest='idb_user',
+        type=str,
+        help='The InfluxDB username',
+        default="admin")
+    parser.add_argument(
+        '--idb-pass',
+        action='store',
+        dest='idb_pass',
+        type=str,
+        help='The InfluxDB password',
+        default="admin")
     parser.add_argument('--idb-db', action='store', dest='idb_db', type=str,
-        help='The InfluxDB database to use')
-    parser.add_argument("--idb-tags",
-        metavar="KEY=VALUE",
-        nargs='+',
-        help=("Specify tags for exported data in the form of key-value pairs. "
-        "(do not put spaces before or after the = sign). "
-        "If a value contains spaces, you should define "
-        "it with double quotes: "
-        'foo="this is a sentence". Note that '
-        "values are always treated as strings."),
+                        help='The InfluxDB database to use')
+    parser.add_argument(
+        "--idb-tags", metavar="KEY=VALUE", nargs='+',
+        help=(
+            "Specify tags for exported data in the form of key-value pairs. "
+            "(do not put spaces before or after the = sign). "
+            "If a value contains spaces, you should define "
+            "it with double quotes: "
+            'foo="this is a sentence". Note that '
+            "values are always treated as strings."),
         default=[])
-    parser.add_argument('--log-level', action='store', dest='log_level', type=str,
-        help='Logging level', default="INFO")
+    parser.add_argument(
+        '--log-level',
+        action='store',
+        dest='log_level',
+        type=str,
+        help='Logging level',
+        default="INFO")
     args = parser.parse_args()
     tags = dict(map(lambda s: s.split('='), args.idb_tags))
     FORMAT = "[ %(levelname)s - %(asctime)s - %(filename)s:%(lineno)s] %(message)s"
