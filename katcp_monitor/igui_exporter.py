@@ -8,7 +8,7 @@ from functools import wraps
 from tornado.gen import coroutine, sleep
 from tornado.ioloop import PeriodicCallback, IOLoop
 from argparse import ArgumentParser
-from .sidecar import KatcpSidecar
+from sidecar import KatcpSidecar
 
 log = logging.getLogger("katcp-monitor")
 
@@ -118,9 +118,9 @@ class IGUIExporter(object):
             log.error(
                 "Received a set request for a non-settable task: {}".format(
                     task["node_name"]))
-            self._set_pending_state(task, 3)
+            self._set_pending_state(task, self.TASK_FAILED)
             return
-        self._set_pending_state(task, 2)
+        self._set_pending_state(task, self.TASK_RUNNING)
         log.info("Setting the value of {} to {}".format(
             task["node_name"], task["desired_value"]))
         try:
@@ -132,9 +132,9 @@ class IGUIExporter(object):
             log.error(
                 "Unable to set value of {} to {} with error: {}".format(
                     task["node_name"], task["desired_value"], str(error)))
-            self._set_pending_state(task, 3)
+            self._set_pending_state(task, self.TASK_FAILED)
         else:
-            self._set_pending_state(task, 0)
+            self._set_pending_state(task, self.TASK_COMPLETE)
 
     def start(self):
         self._ioloop.add_callback(self.handle_pending_requests)
