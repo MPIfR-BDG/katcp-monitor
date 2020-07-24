@@ -8,7 +8,7 @@ from functools import wraps
 from tornado.gen import coroutine, sleep
 from tornado.ioloop import PeriodicCallback, IOLoop
 from argparse import ArgumentParser
-from sidecar import KatcpSidecar
+from .sidecar import KatcpSidecar
 
 log = logging.getLogger("katcp-monitor")
 
@@ -107,10 +107,9 @@ class IGUIExporter(object):
     @coroutine
     def handle_request(self, task):
         if task["node_name"] not in self._descriptions.keys():
-            log.error(
+            log.warning(
                 "Received a set request for an untracked task: {}".format(
                     task["node_name"]))
-            self._set_pending_state(task, 3)
             return
         description = self._descriptions[task["node_name"]]
         if not description.get("setter", None):

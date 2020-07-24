@@ -57,7 +57,7 @@ class TestServer(AsyncDeviceServer):
 
     def auto_update(self):
         log.debug("Setting new sensor values")
-        self._device_status.set_value(random.choice(self.DEVICE_STATUSES))
+        #self._device_status.set_value(random.choice(self.DEVICE_STATUSES))
         self._current_time.set_value(time.time())
 
     def stop(self):

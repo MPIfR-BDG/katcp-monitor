@@ -72,7 +72,7 @@ class KatcpSidecar(object):
         for name in list(added):
             log.debug(
                 "Setting sampling strategy and callbacks on sensor '{}'".format(name))
-            self.rc.set_sampling_strategy(name, "event")
+            self.rc.set_sampling_strategy(name, "auto")
             self.rc.set_sensor_listener(name, self.on_sensor_update)
         self._previous_sensors = current_sensors
 
