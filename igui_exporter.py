@@ -3,116 +3,14 @@ import logging
 import tornado
 import requests
 import time
+import json
 from functools import wraps
-from tornado.gen import coroutine
+from tornado.gen import coroutine, sleep
+from tornado.ioloop import PeriodicCallback, IOLoop
 from argparse import ArgumentParser
-from katcp import KATCPClientResource
+from sidecar import KatcpSidecar
 
-log = logging.getLogger("katcp-exporter")
-
-
-class KatcpSidecar(object):
-    def __init__(self, host, port):
-        """
-        Constructs a new instance.
-
-        :param      host:  The address of the server to sidecar
-        :param      port:  The server port
-        """
-        log.debug("Constructing sidecar for {}:{}".format(host, port))
-        self.rc = KATCPClientResource(dict(
-            name="sidecar-client",
-            address=(host, port),
-            controlled=True))
-        self._update_callbacks = set()
-        self._previous_sensors = set()
-
-    @coroutine
-    def start(self):
-        """
-        @brief     Start the sidecar
-        """
-        @coroutine
-        def _start():
-            log.debug("Waiting on synchronisation with server")
-            yield self.rc.until_synced()
-            log.debug("Client synced")
-            log.debug("Requesting version info")
-            response = yield self.rc.req.version_list()
-            log.info("response: {}".format(response))
-            self.ioloop.add_callback(self.on_interface_changed)
-        self.rc.start()
-        self.ic = self.rc._inspecting_client
-        self.ioloop = self.rc.ioloop
-        self.ic.katcp_client.hook_inform(
-            "interface-changed",
-            lambda message: self.ioloop.add_callback(
-                self.on_interface_changed))
-        self.ioloop.add_callback(_start)
-
-    def stop(self):
-        """
-        @brief      Stop the sidecar
-        """
-        self.rc.stop()
-
-    @coroutine
-    def on_interface_changed(self):
-        """
-        @brief    Synchronise with the sidecar'd servers new sensors
-        """
-        log.debug("Waiting on synchronisation with server")
-        yield self.rc.until_synced()
-        log.debug("Client synced")
-        current_sensors = set(self.rc.sensor.keys())
-        log.debug("Current sensor set: {}".format(current_sensors))
-        removed = self._previous_sensors.difference(current_sensors)
-        log.debug("Sensors removed since last update: {}".format(removed))
-        added = current_sensors.difference(self._previous_sensors)
-        log.debug("Sensors added since last update: {}".format(added))
-        for name in list(added):
-            log.debug(
-                "Setting sampling strategy and callbacks on sensor '{}'".format(name))
-            self.rc.set_sampling_strategy(name, "auto")
-            self.rc.set_sensor_listener(name, self.on_sensor_update)
-        self._previous_sensors = current_sensors
-
-    @coroutine
-    def on_sensor_update(self, sensor, reading):
-        """
-        @brief      Callback to be executed on a sensor being updated
-
-        @param      sensor   A KATCP Sensor Object
-        @param      reading  The sensor reading
-        """
-        log.debug("Recieved sensor update for sensor '{}': {}".format(
-            sensor.name, repr(reading)))
-        for callback in list(self._update_callbacks):
-            try:
-                callback(sensor, reading)
-            except Exception as error:
-                log.exception(
-                    "Failed to call update callback {} with error: {}".format(
-                        callback, str(error)))
-
-    def add_sensor_update_callback(self, callback):
-        """
-        @brief    Add a sensor update callback.
-
-        @param      callback:  The callback
-
-        @note     The callback must have a call signature of
-                  func(sensor, reading)
-        """
-        self._update_callbacks.add(callback)
-
-    def remove_sensor_update_callback(self, callback):
-        """
-        @brief    Remove a sensor update callback.
-
-        @param      callback:  The callback
-        """
-        self._update_callbacks.remove(callback)
+log = logging.getLogger("katcp-monitor")
 
 
 def retry_on_fail(min_interval=5.0, max_interval=600.0, max_retries=None):
@@ -140,6 +38,15 @@ def retry_on_fail(min_interval=5.0, max_interval=600.0, max_retries=None):
     return wrapper
 
 
+def pretty_print_POST(req):
+    print('{}\n{}\r\n{}\r\n\r\n{}'.format(
+        '-----------START-----------',
+        req.method + ' ' + req.url,
+        '\r\n'.join('{}: {}'.format(k, v) for k, v in req.headers.items()),
+        req.body,
+    ))
+
+
 class IGUIExporter(object):
     """
     An exporter for converting KATCP sensor updates to
@@ -149,8 +56,15 @@ class IGUIExporter(object):
     LOG_URL = "/icom/api/logs"
     NODE_URL = "/icom/api/nodes"
 
+    TASK_COMPLETE = 0
+    TASK_PENDING = 1
+    TASK_RUNNING = 2
+    TASK_FAILED = 3
+
     def __init__(self, url, user,
                  password, device_id,
+                 sidecar,
+                 polling_interval=1.0,
                  valid_istates=None):
         """
         @brief    Construct an InfluxDBExporter
@@ -158,22 +72,109 @@ class IGUIExporter(object):
         self._session = requests.Session()
         self._igui_url = url
         self._task_map = {}
+        self._descriptions = {}
         self._device_id = device_id
+        self._sidecar = sidecar
+        self._polling_interval = polling_interval
         self._valid_istates = [1] if valid_istates is None else valid_istates
+        self._ioloop = IOLoop.current()
+        self._stop = False
         self.authorize(user, password)
         self.populate_task_map()
 
-    def url_for(self, path, idx=None):
-        return '{}{}{}'.format(
+    def get_pending_requests(self):
+        log.debug("Fectching pending requests")
+        response = self._session.get(
+            self.url_for(self.NODE_URL, params={
+                "parent_name": self._device_id,
+                "pending_request": self.TASK_PENDING}))
+        response.raise_for_status()
+        log.debug("Fectching pending requests took {} seconds".format(
+            response.elapsed.total_seconds()))
+        if not response.text:
+            return []
+        return response.json()
+
+    def _set_pending_state(self, task, state):
+        log.debug("Setting pending state on {} to {}".format(
+            task["node_name"], state))
+        response = self._session.put(
+            self.url_for(self.NODE_URL, task["node_id"]),
+            json={"pending_request": state})
+        log.debug("Setting pending state took {} seconds".format(
+            response.elapsed.total_seconds()))
+
+    @coroutine
+    def handle_request(self, task):
+        if task["node_name"] not in self._descriptions.keys():
+            log.error(
+                "Received a set request for an untracked task: {}".format(
+                    task["node_name"]))
+            self._set_pending_state(task, 3)
+            return
+        description = self._descriptions[task["node_name"]]
+        if not description.get("setter", None):
+            log.error(
+                "Received a set request for a non-settable task: {}".format(
+                    task["node_name"]))
+            self._set_pending_state(task, 3)
+            return
+        self._set_pending_state(task, 2)
+        log.info("Setting the value of {} to {}".format(
+            task["node_name"], task["desired_value"]))
+        try:
+            yield self._sidecar.make_request(
+                description["setter"],
+                task["desired_value"],
+                timeout=description["timeout"])
+        except Exception as error:
+            log.error(
+                "Unable to set value of {} to {} with error: {}".format(
+                    task["node_name"], task["desired_value"], str(error)))
+            self._set_pending_state(task, 3)
+        else:
+            self._set_pending_state(task, 0)
+
+    def start(self):
+        self._ioloop.add_callback(self.handle_pending_requests)
+        pass
+
+    def stop(self):
+        self._ioloop.clear_current()
+        pass
+
+    @coroutine
+    def handle_pending_requests(self):
+        try:
+            tasks = self.get_pending_requests()
+            log.debug("Found {} tasks with pending updates".format(
+                len(tasks)))
+            for task in tasks:
+                yield self.handle_request(task)
+        except Exception as error:
+            log.error("Error while handling pending requests: {}".format(
+                str(error)))
+        finally:
+            yield sleep(self._polling_interval)
+            self._ioloop.add_callback(self.handle_pending_requests)
+
+    def url_for(self, path, idx=None, params=None):
+        params_str = ""
+        if params:
+            params_str = "?" + "&".join(
+                ["{}={}".format(key, value)
+                 for key, value in params.items()])
+        return '{}{}{}{}'.format(
             self._igui_url,
-            path, "/{}".format(idx) if idx else "")
+            path,
+            "/{}".format(idx) if idx else "",
+            params_str)
 
     @retry_on_fail(min_interval=5.0, max_interval=600.0, max_retries=None)
     def authorize(self, user, password):
         response = self._session.get(
                     self.url_for(self.AUTH_URL),
                     auth=(user, password))
-
         if response.status_code != 200:
             raise Exception("Authorization request failed with status [{}]: {}".format(
                     response.status_code, response.reason))
@@ -195,12 +196,15 @@ class IGUIExporter(object):
                     reading.istatus))
             return
         valid_name = sensor.name.replace("-", "_").replace(".", "_")
-
         if valid_name in self._task_map.keys():
+            log.debug("Executing PUT request")
             response = self._session.put(
                 self.url_for(self.NODE_URL, self._task_map[valid_name]),
                 json={"current_value": reading.value})
+            log.debug("PUT request took {} seconds for sensor {}".format(
+                response.elapsed.total_seconds(), valid_name))
         else:
+            log.debug("Executing POST request")
             response = self._session.post(
                 self.url_for(self.NODE_URL),
                 json={
@@ -210,12 +214,22 @@ class IGUIExporter(object):
                         },
                     'node_name': valid_name,
                     'parent_name': self._device_id})
+            log.debug("POST request took {} seconds".format(
+                response.elapsed.total_seconds()))
             log.debug(response.json())
             self._task_map[valid_name] = response.json()["node_id"]
 
+        try:
+            self._descriptions[valid_name] = json.loads(
+                sensor.description)
+        except Exception as error:
+            log.warning("Could not parse sensor description: {}".format(
+                str(error)))
+
 
 @coroutine
-def on_shutdown(ioloop, client):
+def on_shutdown(ioloop, client, handler):
+    handler.stop()
     log.info("Shutting down client")
     yield client.stop()
     ioloop.stop()
@@ -241,23 +255,24 @@ def main():
         help='Logging level', default="INFO")
     args = parser.parse_args()
     FORMAT = "[ %(levelname)s - %(asctime)s - %(filename)s:%(lineno)s] %(message)s"
-    logger = logging.getLogger('katcp-exporter')
+    logger = logging.getLogger('katcp-monitor')
     logging.basicConfig(format=FORMAT)
     logger.setLevel(args.log_level.upper())
     logging.getLogger('katcp').setLevel('INFO')
     ioloop = tornado.ioloop.IOLoop.current()
     log.info("Starting KATCPToIGUIConverter instance")
-    client = client = KatcpSidecar(args.host, args.port)
+    client = KatcpSidecar(args.host, args.port)
     signal.signal(
         signal.SIGINT,
         lambda sig, frame: ioloop.add_callback_from_signal(
-            on_shutdown, ioloop, client))
-    handler = IGUIExporter(args.igui_url, args.igui_user, args.igui_pass, args.igui_parent)
+            on_shutdown, ioloop, client, handler))
+    handler = IGUIExporter(args.igui_url, args.igui_user, args.igui_pass, args.igui_parent, client)
     client.add_sensor_update_callback(handler.sensor_udpate_callback)
 
     def start_and_display():
         client.start()
         log.info("Ctrl-C to terminate client")
+        handler.start()
 
     ioloop.add_callback(start_and_display)
     ioloop.start()

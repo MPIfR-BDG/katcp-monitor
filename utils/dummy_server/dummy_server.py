@@ -24,10 +24,11 @@ import coloredlogs
 import time
 import signal
 import random
-from tornado.gen import coroutine
+import json
+from tornado.gen import coroutine, sleep, Return
 from tornado.ioloop import IOLoop, PeriodicCallback
 from katcp import Sensor, AsyncDeviceServer
-from katcp.kattypes import request, return_reply, Str
+from katcp.kattypes import request, Str, concurrent_reply
 
 log = logging.getLogger("testserver")
 
@@ -55,6 +56,7 @@ class TestServer(AsyncDeviceServer):
         super(TestServer, self).start()
 
     def auto_update(self):
+        log.debug("Setting new sensor values")
         self._device_status.set_value(random.choice(self.DEVICE_STATUSES))
         self._current_time.set_value(time.time())
 
@@ -76,7 +78,10 @@ class TestServer(AsyncDeviceServer):
         """
         self._device_status = Sensor.discrete(
             "device-status",
-            description="Health status of FBFUSE",
+            description=json.dumps(dict(
+                description="Health of device server",
+                valid_states=self.DEVICE_STATUSES
+                )),
             params=self.DEVICE_STATUSES,
             default="ok",
             initial_status=Sensor.NOMINAL)
@@ -84,31 +89,39 @@ class TestServer(AsyncDeviceServer):
 
         self._current_time = Sensor.float(
             "current-time",
-            description="The current time",
+            description=json.dumps(dict(
+                description="The current time",
+                )),
             default=time.time(),
             initial_status=Sensor.NOMINAL)
         self.add_sensor(self._current_time)
 
         self._dummy_sensor = Sensor.string(
             "dummy-sensor",
-            description="A dummy sensor with a mutable value",
+            description=json.dumps(dict(
+                description="A dummy sensor with a mutable value",
+                setter="set-dummy-sensor-value",
+                timeout=30.0
+                )),
             default="",
-            initial_status=Sensor.UNKNOWN)
+            initial_status=Sensor.NOMINAL)
         self.add_sensor(self._dummy_sensor)
 
     @request(Str())
-    @return_reply()
+    @concurrent_reply
+    @coroutine
     def request_set_dummy_sensor_value(self, req, value):
         """
         @brief   Set the value of the dummy sensor
         """
         try:
-            self._dummy_sensor.set_valeu(value)
+            self._dummy_sensor.set_value(value)
+            yield sleep(5)
         except Exception as error:
             log.exception(str(error))
-            return ("fail", str(error))
+            raise Return(("fail", str(error)))
         else:
-            return ("ok",)
+            raise Return(("ok",))
 
 
 @coroutine
