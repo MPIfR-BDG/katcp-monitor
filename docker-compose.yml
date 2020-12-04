@@ -3,7 +3,7 @@ services:
         igui_exporter:
                 image: igui_exporter:latest
                 entrypoint: 'python igui_exporter.py '
-                command: '--host 134.104.18.167  --port 5000 --igui-url http://134.104.16.96 --igui-user <> --igui-pass <> --igui-parent <parent_naem or id> --log-level info'
+                command: '--host 0.0.0.0 --port 5000 --igui-url http://134.104.16.96 --igui-user ubb --igui-pass ubb --igui-parent EDD-MASTER --log-level debug'
                 expose:
                         - "5000"
 

@@ -62,6 +62,8 @@ class IGUIExporter(object):
     TASK_PENDING = 1
     TASK_RUNNING = 2
     TASK_FAILED = 3
+    HAS_ERROR = 1
+    NO_ERROR = 0
 
     def __init__(self, url, user,
                  password, device_id,
@@ -93,16 +95,19 @@ class IGUIExporter(object):
         response.raise_for_status()
         log.debug("Fectching pending requests took {} seconds".format(
             response.elapsed.total_seconds()))
+        log.debug(response.text)
         if not response.text:
             return []
         return response.json()
 
-    def _set_pending_state(self, task, state):
+    def _set_pending_state(self, task, state, error_state, error_message="NONE"):
         log.debug("Setting pending state on {} to {}".format(
             task["node_name"], state))
         response = self._session.put(
             self.url_for(self.NODE_URL, task["node_id"]),
-            json={"pending_request": state})
+            json={"pending_request": state,
+                  "error_state": error_state,
+                  "last_error_message": error_message})
         log.debug("Setting pending state took {} seconds".format(
             response.elapsed.total_seconds()))
 
@@ -115,12 +120,12 @@ class IGUIExporter(object):
             return
         description = self._descriptions[task["node_name"]]
         if not description.get("setter", None):
-            log.error(
-                "Received a set request for a non-settable task: {}".format(
-                    task["node_name"]))
-            self._set_pending_state(task, self.TASK_FAILED)
+            message = "Received a set request for a non-settable task: {}".format(
+                task["node_name"])
+            log.error(message)
+            self._set_pending_state(task, self.TASK_FAILED, self.HAS_ERROR, message)
             return
-        self._set_pending_state(task, self.TASK_RUNNING)
+        self._set_pending_state(task, self.TASK_RUNNING, self.NO_ERROR)
         log.info("Setting the value of {} to {}".format(
             task["node_name"], task["desired_value"]))
         try:
@@ -129,12 +134,12 @@ class IGUIExporter(object):
                 task["desired_value"],
                 timeout=description["timeout"])
         except Exception as error:
-            log.error(
-                "Unable to set value of {} to {} with error: {}".format(
-                    task["node_name"], task["desired_value"], str(error)))
-            self._set_pending_state(task, self.TASK_FAILED)
+            message = "Unable to set value of {} to {} with error: {}".format(
+                task["node_name"], task["desired_value"], str(error))
+            log.error(message)
+            self._set_pending_state(task, self.TASK_FAILED, self.HAS_ERROR, message)
         else:
-            self._set_pending_state(task, self.TASK_COMPLETE)
+            self._set_pending_state(task, self.TASK_COMPLETE, self.NO_ERROR)
 
     def start(self):
         self._ioloop.add_callback(self.handle_pending_requests)
@@ -151,7 +156,8 @@ class IGUIExporter(object):
             log.debug("Found {} tasks with pending updates".format(
                 len(tasks)))
             for task in tasks:
-                yield self.handle_request(task)
+                if task["pending_request"] == "1":
+                    yield self.handle_request(task)
         except Exception as error:
             log.error("Error while handling pending requests: {}".format(
                 str(error)))
@@ -189,10 +195,12 @@ class IGUIExporter(object):
         response = self._session.get(
             self.url_for(
                 self.TREE_URL,
-                self._device_id))
+                self._device_id,
+                params={"node_type": "Tasks"}))
         tree = response.json()
         for child in tree["children"]:
             self._task_map[child["data"]["node_name"]] = child["id"]
+        log.debug("Recovered task map: \n{}".format(self._task_map))
 
     def sensor_udpate_callback(self, sensor, reading):
         if reading.istatus not in self._valid_istates:
@@ -200,25 +208,34 @@ class IGUIExporter(object):
                 "Handler ignoring reading with invalid istatus ({})".format(
                     reading.istatus))
             return
+
+        try:
+            metadata = json.loads(sensor.description)["metadata"]
+        except:
+            metadata = {"mysql_task_type": "GET"}
+
         valid_name = sensor.name.replace("-", "_").replace(".", "_")
         if valid_name in self._task_map.keys():
             log.debug("Executing PUT request")
             response = self._session.put(
                 self.url_for(self.NODE_URL, self._task_map[valid_name]),
-                json={"current_value": reading.value})
+                json={
+                    "current_value": reading.value,
+                    "metadata": metadata
+                })
             log.debug("PUT request took {} seconds for sensor {}".format(
                 response.elapsed.total_seconds(), valid_name))
         else:
             log.debug("Executing POST request")
+            log.debug("METADATA for sensor {}: {}".format(sensor.name, metadata))
             response = self._session.post(
                 self.url_for(self.NODE_URL),
                 json={
                     'current_value': reading.value,
-                    'metadata': {
-                        'mysql_task_type': 'GET'
-                    },
+                    'metadata': metadata,
                     'node_name': valid_name,
-                    'parent_name': self._device_id})
+                    'parent_name': self._device_id,
+                    'node_type': 'Tasks'})
             log.debug("POST request took {} seconds".format(
                 response.elapsed.total_seconds()))
             log.debug(response.json())

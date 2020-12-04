@@ -27,7 +27,7 @@ import random
 import json
 from tornado.gen import coroutine, sleep, Return
 from tornado.ioloop import IOLoop, PeriodicCallback
-from katcp import Sensor, AsyncDeviceServer
+from katcp import Sensor, AsyncDeviceServer, AsyncReply
 from katcp.kattypes import request, Str, concurrent_reply
 
 log = logging.getLogger("testserver")
@@ -52,17 +52,18 @@ class TestServer(AsyncDeviceServer):
         @brief  Start the TestServer server
         """
         self._cb = PeriodicCallback(self.auto_update, 1000)
-        self._cb.start()
+        #self._cb.start()
+        print(self._cb)
         super(TestServer, self).start()
 
     def auto_update(self):
         log.debug("Setting new sensor values")
-        #self._device_status.set_value(random.choice(self.DEVICE_STATUSES))
+        self._device_status.set_value(random.choice(self.DEVICE_STATUSES))
         self._current_time.set_value(time.time())
 
     def stop(self):
         super(TestServer, self).stop()
-        self._cb.stop()
+        #self._cb.stop()
 
     def add_sensor(self, sensor):
         log.debug("Adding sensor: {}".format(sensor.name))
@@ -100,6 +101,11 @@ class TestServer(AsyncDeviceServer):
             "dummy-sensor",
             description=json.dumps(dict(
                 description="A dummy sensor with a mutable value",
+                metadata={
+                    "mysql_task_type": "DROPDOWN",
+                    "options": {"weee":0, "wooo":1, "wayhay":2},
+                    "label": "Dummy Sensor Value"
+                    },
                 setter="set-dummy-sensor-value",
                 timeout=30.0
                 )),
@@ -107,22 +113,88 @@ class TestServer(AsyncDeviceServer):
             initial_status=Sensor.NOMINAL)
         self.add_sensor(self._dummy_sensor)
 
+        self._bool_sensor = Sensor.boolean(
+            "bool-sensor",
+            description=json.dumps(dict(
+                description="A bool sensor with a mutable value",
+                metadata={
+                    "mysql_task_type": "BOOL"
+                    },
+                setter="set-bool-sensor-value",
+                timeout=30.0
+                )),
+            default=False,
+            initial_status=Sensor.NOMINAL)
+        self.add_sensor(self._bool_sensor)
+
+        self._getset_sensor = Sensor.string(
+            "getset-sensor",
+            description=json.dumps(dict(
+                description="A getset sensor with a mutable value",
+                metadata={
+                    "mysql_task_type": "GET_SET"
+                    },
+                setter="set-getset-sensor-value",
+                timeout=30.0
+                )),
+            default="A value!",
+            initial_status=Sensor.NOMINAL)
+        self.add_sensor(self._getset_sensor)
+
     @request(Str())
-    @concurrent_reply
-    @coroutine
     def request_set_dummy_sensor_value(self, req, value):
         """
         @brief   Set the value of the dummy sensor
         """
-        try:
-            self._dummy_sensor.set_value(value)
-            yield sleep(5)
-        except Exception as error:
-            log.exception(str(error))
-            raise Return(("fail", str(error)))
-        else:
-            raise Return(("ok",))
+        @coroutine
+        def func():
+            try:
+                self._dummy_sensor.set_value(value)
+                yield sleep(5)
+            except Exception as error:
+                log.exception(str(error))
+                req.reply("fail", str(error))
+            else:
+                req.reply("ok",)
+        self.ioloop.add_callback(func)
+        raise AsyncReply
 
+
+    @request(Str())
+    def request_set_bool_sensor_value(self, req, value):
+        """
+        @brief   Set the value of the bool sensor
+        """
+        @coroutine
+        def func():
+            try:
+                self._bool_sensor.set_value(bool(int(value)))
+                yield sleep(5)
+            except Exception as error:
+                log.exception(str(error))
+                req.reply("fail", str(error))
+            else:
+                req.reply("ok",)
+        self.ioloop.add_callback(func)
+        raise AsyncReply
+
+    @request(Str())
+    def request_set_getset_sensor_value(self, req, value):
+        """
+        @brief   Set the value of the bool sensor
+        """
+        @coroutine
+        def func():
+            try:
+                self._getset_sensor.set_value(value)
+                yield sleep(5)
+            except Exception as error:
+                log.exception(str(error))
+                req.reply("fail", str(error))
+            else:
+                req.reply("ok",)
+        self.ioloop.add_callback(func)
+        raise AsyncReply
 
 @coroutine
 def on_shutdown(ioloop, server):
